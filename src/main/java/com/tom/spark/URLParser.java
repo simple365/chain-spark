@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-
 public class URLParser {
     protected byte type;
     protected static final byte TYPE_URL = 1;
