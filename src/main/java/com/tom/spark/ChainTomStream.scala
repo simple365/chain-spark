@@ -124,9 +124,9 @@ object ChainTomStream {
       for (i <- 0 to orderIdsArray.size() - 1) orderIdsSet.add(orderIdsArray.getString(i))
       resJson.put("userIds", set2JsonString(orderIdsSet))
 //      serverSpan
-      val serverSpan1=obj1.getJSONArray("serverSpan")
-      val serverSpan2=obj2.getJSONArray("serverSpan")
-
+      val serverSpan1=obj1.getJSONObject("serverSpan")
+      val serverSpan2=obj2.getJSONObject("serverSpan")
+      
       obj1
     })
 
