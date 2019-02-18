@@ -169,7 +169,6 @@ public class ChainJson {
             chainMap.put("timestamp", beginTimestamp);
             chainMap.put("spanTotal", spanTotal);
 //            serviceMaps.clear();
-
 //            listStr = "{\"traceId\":\"" + traceId + "\",\"maxDuration\":" + maxDuration + ",\"timestamp\":" + beginTimestamp + ",\"spanTotal\":" + spanTotal + extStr + serverNmaeStr + "}";
 //            resStr = "{\"daily\":"+gson.toJson(dailyList)+",\"chain\":"+listStr+"}";
             Map<String, Object> map = new HashMap<>();

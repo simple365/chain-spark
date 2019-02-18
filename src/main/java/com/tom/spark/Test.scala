@@ -1,5 +1,8 @@
 package com.tom.spark
 
+import com.alibaba.fastjson.{JSON, JSONArray, JSONObject}
+import com.google.gson.JsonArray
+import com.tom.spark.ChainTomStream.set2JsonString
 import org.json4s.DefaultFormats
 import org.json4s.jackson.Json
 
@@ -24,6 +27,64 @@ object Test {
     orderIdsSet.add("be")
     val st=Json(DefaultFormats).write(orderIdsSet)
     println(st)
-  }
 
+    val str1="{\"traceId\":\"415946b871a65c49f6be24d2430e648c\",\"maxDuration\":5419,\"timestamp\":1550010847543641,\"spanTotal\":6,\"orderIds\":[\"2184433692\",\"24433692\"],\"userIds\":[\"a\",\"b\"],\"serverSpan\":{\"mysql\":{\"subSpanTotal\":1,\"subMaxDuration\":1419},\"hsq2\":{\"subSpanTotal\":5,\"subMaxDuration\":5419}}}"
+    val str2="{\"traceId\":\"415946b871a65c49f6be24d2430e648c\",\"maxDuration\":6419,\"timestamp\":2550010847543641,\"spanTotal\":2,\"orderIds\":[\"24433692\"],\"userIds\":[\"a\",\"c\"],\"serverSpan\":{\"mysql\":{\"subSpanTotal\":1,\"subMaxDuration\":2345},\"hsq2\":{\"subSpanTotal\":5,\"subMaxDuration\":5419}}}"
+
+    val obj1=JSON.parseObject(str1)
+    val obj2=JSON.parseObject(str2)
+    println(testCompare(obj1,obj2))
+  }
+   def testCompare(obj1: JSONObject, obj2: JSONObject): JSONObject ={
+
+       val resJson = new JSONObject()
+       //      将两个json合并到一起,用obj1作为返回结果了。
+       val maxDuration = obj1.getInteger("maxDuration") + obj2.getInteger("maxDuration")
+       resJson.put("maxDuration", maxDuration)
+       //      算出最近一次该trace出现的时间,这个时间其实是16位
+       val timestam1 = obj1.getLongValue("timestamp")
+       val timestam2 = obj2.getLongValue("timestamp")
+       val maxTimeStamp = if (timestam1 > timestam2) timestam1 else timestam2
+       resJson.put("timestamp", maxTimeStamp)
+       //      SPAN total
+       val spanTotal = obj1.getInteger("spanTotal") + obj2.getInteger("spanTotal")
+       resJson.put("spanTotal", spanTotal)
+       //      order id
+       val orderIdsSet = mutable.HashSet[String]()
+       val orderIdsArray: JSONArray = new JSONArray()
+       if (obj1.containsKey("orderIds")) obj1.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
+       if (obj2.containsKey("orderIds")) obj2.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
+       //      去重
+       for (i <- orderIdsSet) orderIdsArray.add(i)
+       resJson.put("orderIds", orderIdsArray)
+       //      user id
+       val usrIdSet = mutable.HashSet[String]()
+       val usrIdArray = new JSONArray()
+       if (obj1.containsKey("userIds")) obj1.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
+       if (obj2.containsKey("userIds")) obj2.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
+       for (i <- usrIdSet) usrIdArray.add(i)
+       resJson.put("userIds", usrIdArray)
+       //      serverSpan
+       val serverSpan1 = obj1.getJSONObject("serverSpan")
+       val serverSpan2 = obj2.getJSONObject("serverSpan")
+       //      取最大的 subSpanTotal，subMaxDuration
+       for (key1 <- serverSpan1.keySet().toArray) {
+         val span1=serverSpan1.getJSONObject(key1.toString)
+         val subSpanTotal1 = span1.getInteger("subSpanTotal")
+         resJson.put("subSpanTotal",subSpanTotal1)
+         val subMaxDuration1 = span1.getInteger("subMaxDuration")
+         resJson.put("subMaxDuration", subMaxDuration1)
+         for (key2 <- serverSpan2.keySet().toArray) {
+           val span2=serverSpan2.getJSONObject(key2.toString)
+           if (key1.toString == key2.toString) {
+             val subSpanTotal2 = span2.getInteger("subSpanTotal")
+             resJson.put("subSpanTotal", if (subSpanTotal1 > subSpanTotal2) subSpanTotal1 else subSpanTotal2)
+             val subMaxDuration2 = span2.getInteger("subMaxDuration")
+             resJson.put("subMaxDuration", if (subMaxDuration1 > subMaxDuration2) subMaxDuration1 else subMaxDuration2)
+           }
+         }
+       }
+       resJson
+
+   }
 }
