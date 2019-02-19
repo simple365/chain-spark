@@ -17,7 +17,7 @@ import scala.collection.mutable.Map
 
 object ChainTomStream {
 
-    private val logger: Logger = LoggerFactory.getLogger(StreamingHsqChain.getClass)
+    private val logger: Logger = LoggerFactory.getLogger(ChainTomStream.getClass)
   //  val sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
 
@@ -41,12 +41,12 @@ object ChainTomStream {
 
 
     val conf = new SparkConf().setAppName(appName)
-      .set("spark.streaming.kafka.consumer.cache.enabled", "false")
+//      .set("spark.streaming.kafka.consumer.cache.enabled", "false")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      .set("spark.kryo.registrator", "net.haoshiqi.java.ChainRegistrator")
       // 限制从kafka中每秒每个分区拉取的数据量
       .set("spark.streaming.kafka.maxRatePerPartition", "8000")
-    //     conf.setMaster("local[*]")
+         conf.setMaster("local[*]")
 
     val ssc = new StreamingContext(conf, Seconds(second.toInt))
 //    ssc.checkpoint(checkpointPath)
@@ -70,48 +70,51 @@ object ChainTomStream {
     )
 
     // 从kafka中读取数据后，先解析出来详细数据，插入es
-    val detailStream=kafaDirectStream.map(line => {
-      var res: String = ""
-      val chainStr=line.value()
-      if (chainStr != null && !chainStr.isEmpty) {
-        if (chainStr.substring(0, 1) == "{") {
-          val obj = new JsonParser().parse(chainStr).getAsJsonObject
-          if (obj.has("message")) {
-            val msg = obj.get("message").toString
-            if (msg.substring(0, 1) == "[") {
-              res = dealDetailJson(msg)
-            }
-          }
-        }
-        else if (chainStr.substring(0, 1) == "[") {
-          res = dealDetailJson(chainStr)
-        }
-      }
-      res
-    })
+//    val detailStream=kafaDirectStream.map(line => {
+//      var res: String = ""
+//      val chainStr=line.value()
+//      if (chainStr != null && !chainStr.isEmpty) {
+//        if (chainStr.substring(0, 1) == "{") {
+//          val obj = new JsonParser().parse(chainStr).getAsJsonObject
+//          if (obj.has("message")) {
+//            val msg = obj.get("message").toString
+//            if (msg.substring(0, 1) == "[") {
+//              res = dealDetailJson(msg)
+//            }
+//          }
+//        }
+//        else if (chainStr.substring(0, 1) == "[") {
+//          res = dealDetailJson(chainStr)
+//        }
+//      }
+//      res
+//    })
 
     // 每次处理上几分钟的数据
-//    val mapvalues = kafaDirectStream.map(line =>dealKafkaJson(line.value()))
-    //    .filter(_ != None).window(Seconds(windowTimeMinute.toInt * 60)).repartition(200)
-//      .map(x => {
-//        //将traceId解析出来，然后进行聚合
-//        val resJsonObjectString = x.getOrElse("")
-//        val resJsonObject = JSON.parseObject(resJsonObjectString)
-//        var traceId = ""
-//        if (resJsonObject.containsKey("traceId")) traceId = resJsonObject.getString("traceId")
-//        (traceId, resJsonObject)
-//      }).filter(_._1 != "").reduceByKey((obj1: JSONObject, obj2: JSONObject) => mergeTrace(obj1, obj2)).map(x => x._2)
-//
+    val mapvalues = kafaDirectStream.map(line =>dealKafkaJson(line.value()))
+        .filter(_ != None).window(Seconds(windowTimeMinute.toInt * 60)).repartition(200)
+      .map(x => {
+        //将traceId解析出来，然后进行聚合
+        val resJsonObjectString = x.getOrElse("")
+        val resJsonObject = JSON.parseObject(resJsonObjectString)
+        var traceId = ""
+        if (resJsonObject.containsKey("traceId")) traceId = resJsonObject.getString("traceId")
+        (traceId, resJsonObject)
+      }).filter(_._1 != "").reduceByKey((obj1: JSONObject, obj2: JSONObject) => mergeTrace(obj1, obj2)).map(x => x._2)
+
     // 将最终的数据放入到es中。
-    detailStream.foreachRDD(rdd => {
-      rdd.take(3).foreach(x=>logger.error("the result sample is  "+x))
-//      val currentTimestamp = ssc.sparkContext.broadcast(System.currentTimeMillis() - timeSplitBorder.toInt * 60 * 1000)
-//      rdd.coalesce(500).foreachPartition(partitionOfRecords => {
-//        partitionOfRecords.foreach(pair => {
-//          if (pair.getLong("maxTimeStamp") / 1000 > currentTimestamp.value)
-//            EsClientUtil.bulkListAdd(pair.toJSONString)
-//        })
-//      })
+    mapvalues.foreachRDD(rdd => {
+//      日志打印
+      rdd.take(3).foreach(x=>logger.error("处理结果样本是  "+x))
+      logger.error(" 时间过滤前数据量:"+rdd.count())
+//      根据预设的时间值，设定时间边界
+      val currentTimestamp = ssc.sparkContext.broadcast(System.currentTimeMillis() - timeSplitBorder.toInt * 60 * 1000)
+//      去掉那些最后出现时间早于时间边界的trace信息
+      val afterRdd=rdd.filter(pair=>{pair.getLong("timestamp") / 1000 > currentTimestamp.value})
+//      结果写入es
+      afterRdd.coalesce(500).foreachPartition(partitionOfRecords => partitionOfRecords.foreach(pair =>EsClientUtil.bulkListAdd(pair.toJSONString)))
+      logger.error("timeSplitBorder: "+timeSplitBorder+" split:"+currentTimestamp.value.toString+" 时间过滤完成后数据量:"+afterRdd.count())
+      afterRdd.take(3).foreach(x=>logger.error("时间过滤完成后样本是：  "+x))
     })
 
     ssc.start()
@@ -145,6 +148,8 @@ object ChainTomStream {
     //          }
     //        }
     val resJson = new JSONObject()
+    //trace id
+    resJson.put("traceId",obj1.getString("traceId"))
     //      将两个json合并到一起,用obj1作为返回结果了。
     val maxDuration = obj1.getInteger("maxDuration") + obj2.getInteger("maxDuration")
     resJson.put("maxDuration", maxDuration)
@@ -314,15 +319,11 @@ object ChainTomStream {
                 val userId = urlParser.getParameter("userId")
                 if (userId != null) userIdsSet.add(userId)
                 val userIds = urlParser.getParameter("userIds")
-                if (userIds != null) {
-                  userIds.split(",").foreach(x => userIdsSet.add(x))
-                }
+                if (userIds != null) userIds.split(",").foreach(x => userIdsSet.add(x))
                 val orderId = urlParser.getParameter("orderId")
                 if (orderId != null) orderIdsSet.add(orderId)
                 val orderIds = urlParser.getParameter("orderIds")
-                if (orderIds != null) {
-                  orderIds.split(",").foreach(x => orderIdsSet.add(x))
-                }
+                if (orderIds != null) orderIds.split(",").foreach(x => orderIdsSet.add(x))
               } catch {
                 case ex: Exception =>
                   ex.printStackTrace()
@@ -335,10 +336,10 @@ object ChainTomStream {
       if (!userIdsSet.isEmpty || !orderIdsSet.isEmpty) {
         val userIdsArray: JSONArray = new JSONArray()
         userIdsSet.toArray.foreach(x => userIdsArray.add(x))
-        resultJson.put("userIds", set2JsonString(userIdsSet))
+        resultJson.put("userIds", userIdsArray)
         val orderIdsArray: JSONArray = new JSONArray()
-        userIdsSet.toArray.foreach(x => orderIdsArray.add(x))
-        resultJson.put("orderIds", orderIdsSet)
+        orderIdsSet.toArray.foreach(x => orderIdsArray.add(x))
+        resultJson.put("orderIds", orderIdsArray)
       }
       val serviceNameJson = new JSONObject()
       for ((x: String, y: JSONObject) <- serviceMaps) serviceNameJson.put(x, y)
@@ -384,15 +385,4 @@ object ChainTomStream {
     res
   }
 
-  /**
-    * 把一个set变成json string
-    *
-    * @param theSet
-    * @return
-    */
-  def set2JsonString(theSet: mutable.HashSet[String]): String = {
-    val orderIdsArray: JSONArray = new JSONArray()
-    theSet.toArray.foreach(x => orderIdsArray.add(x))
-    orderIdsArray.toJSONString
-  }
 }

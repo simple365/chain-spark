@@ -49,20 +49,20 @@
             <artifactId>spark-streaming_${scala.version}</artifactId>
             <version>${spark.version}</version>
         </dependency>
-        <dependency>
+       <!-- <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_${scala.version}</artifactId>
             <version>${spark.version}</version>
         </dependency>
         <dependency>
-        <groupId>org.apache.spark</groupId>
-        <artifactId>spark-streaming-kafka_${scala.version}</artifactId>
-        <version>1.6.2</version>
-        </dependency>
-        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.25</version>
+        </dependency>-->
+        <dependency>
+        <groupId>org.apache.spark</groupId>
+        <artifactId>spark-streaming-kafka_${scala.version}</artifactId>
+        <version>1.6.2</version>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -80,7 +80,7 @@
             <version>2.11.8</version>
         </dependency>
 
-        <dependency>
+       <!-- <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-mllib_2.11</artifactId>
             <version>2.3.0</version>
@@ -120,7 +120,7 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
             <version>1.17</version>
-        </dependency>
+        </dependency>-->
 
     </dependencies>
 
@@ -180,10 +180,29 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.6.1</version>
                 <configuration>
-                    <source>8</source>
-                    <target>8</target>
+                    <source>1.8</source>
+                    <target>1.8</target>
                 </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>2.10</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

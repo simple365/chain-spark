@@ -1,0 +1,9 @@
+./kafka-console-consumer.sh --zookeeper localhost:2181  --topic  test --from-beginning
+
+
+./kafka-producer-perf-test.sh --topic test --throughput 2000 --num-records 100000 --payload-file /mnt/hawk/tmp/data.txt --producer-props bootstrap.servers=localhost:9092
+
+nohup
+spark-submit --master yarn --conf spark.yarn.executor.memoryOverhead=2048 --jars fastjson-1.2.50.jar,kafka-clients-0.10.2.0.jar,spark-streaming-kafka-0-10_2.11-2.1.0.jar  --class com.tom.spark.ChainTomStream  original-chain-spark-1.0-SNAPSHOT.jar chainTest 10 earliest StreamingHsqChain hsqchain 20 3
+
+spark-submit --master yarn --conf spark.yarn.executor.memoryOverhead=2048 --jars fastjson-1.2.50.jar,kafka-clients-0.10.2.0.jar,spark-streaming-kafka-0-10_2.11-2.1.0.jar  --class com.tom.spark.ChainEStream  original-chain-spark-1.0-SNAPSHOT.jar chainEs 10 earliest StreamingHsqChain hsqchain 20 3
