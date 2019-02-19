@@ -4,8 +4,9 @@ import java.net.URL
 
 import com.alibaba.fastjson.{JSON, JSONArray, JSONObject}
 import com.google.gson.JsonParser
-import org.elasticsearch.action.index.IndexRequest
-import org.elasticsearch.common.xcontent.XContentType
+import org.slf4j.{Logger, LoggerFactory}
+//import org.elasticsearch.action.index.IndexRequest
+//import org.elasticsearch.common.xcontent.XContentType
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming._
@@ -16,7 +17,7 @@ import scala.collection.mutable.Map
 
 object ChainTomStream {
 
-  //  private val logger: Logger = LoggerFactory.getLogger(StreamingHsqChain.getClass)
+    private val logger: Logger = LoggerFactory.getLogger(StreamingHsqChain.getClass)
   //  val sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
 
@@ -26,22 +27,29 @@ object ChainTomStream {
     val offsetType = args(2)
     val appName = args(3)
     val ckPoint = args(4)
+    //    每次取多长时间的数据
+    val windowTimeMinute: String = if (args(5) != null) args(5) else "20"
+    //    从当前时间开始，早于这个时间的数据就不计算了
+    val timeSplitBorder: String = if (args(6) != null) args(6) else "10"
 
-    val topic = "hsq-zipkin"
-    val kafkaUrl = "10.0.0.211:9211,10.0.0.212:9212,10.0.0.213:9213,10.0.0.214:9214,10.0.0.215:9215"
-    val checkpointPath = "hdfs://10.0.0.215:8020/home/hadoop/" + ckPoint
+//    val topic = "hsq-zipkin"
+//    val kafkaUrl = "10.0.0.211:9211,10.0.0.212:9212,10.0.0.213:9213,10.0.0.214:9214,10.0.0.215:9215"
+//    val checkpointPath = "hdfs://10.0.0.215:8020/home/hadoop/" + ckPoint
+    val topic = "test"
+    val kafkaUrl = "localhost:9092"
+    val checkpointPath = "hdfs:///tmp/" + ckPoint
 
 
     val conf = new SparkConf().setAppName(appName)
       .set("spark.streaming.kafka.consumer.cache.enabled", "false")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .set("spark.kryo.registrator", "net.haoshiqi.java.ChainRegistrator")
+//      .set("spark.kryo.registrator", "net.haoshiqi.java.ChainRegistrator")
       // 限制从kafka中每秒每个分区拉取的数据量
       .set("spark.streaming.kafka.maxRatePerPartition", "8000")
     //     conf.setMaster("local[*]")
 
     val ssc = new StreamingContext(conf, Seconds(second.toInt))
-    ssc.checkpoint(checkpointPath)
+//    ssc.checkpoint(checkpointPath)
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> kafkaUrl,
@@ -49,7 +57,7 @@ object ChainTomStream {
       "value.deserializer" -> classOf[StringDeserializer],
       "group.id" -> groupId,
       "auto.offset.reset" -> offsetType, // latest,earliest
-      "enable.auto.commit" -> (true: java.lang.Boolean)
+      "enable.auto.commit" -> (false: java.lang.Boolean)
     )
     val topics = Array(topic)
 
@@ -62,103 +70,134 @@ object ChainTomStream {
     )
 
     // 从kafka中读取数据后，先解析出来详细数据，插入es
-    kafaDirectStream.map(line => dealDetailJson(line.value()))
-
-    // 每次处理上几分钟的数据
-    val mapvalues = kafaDirectStream.window(Seconds(8 * 60)).map(line => {
-      //      解析kafka里面的日志
-      val res = dealKafkaJson(line.value())
-      res
-    }).filter(_ != None).repartition(200)
-      .map(x => {
-        //将traceId解析出来，然后进行聚合
-        val resJsonObjectString = x.getOrElse("")
-        val resJsonObject = JSON.parseObject(resJsonObjectString)
-        var traceId = ""
-        if (resJsonObject.containsKey("traceId")) traceId = resJsonObject.getString("traceId")
-        (traceId, resJsonObject)
-      }).filter(_._1 != "").reduceByKey((obj1: JSONObject, obj2: JSONObject) => {
-      //   {
-      //          "traceId": "415946b871a65c49f6be24d2430e648c",
-      //          "maxDuration": 5419,
-      //          "timestamp": 1550010847543641,
-      //          "spanTotal": 6,
-      //          "orderIds": ["2184433692"],
-      //          "userIds":["a","b"],
-      //          "serverSpan": {
-      //            "mysql": {
-      //              "subSpanTotal": 1,
-      //              "subMaxDuration": 1419
-      //            },
-      //            "hsq2": {
-      //              "subSpanTotal": 5,
-      //              "subMaxDuration": 5419
-      //            }
-      //          }
-      //        }
-      val resJson = new JSONObject()
-      //      将两个json合并到一起,用obj1作为返回结果了。
-      val maxDuration = obj1.getInteger("maxDuration") + obj2.getInteger("maxDuration")
-      resJson.put("maxDuration", maxDuration)
-      //      算出最近一次该trace出现的时间,这个时间其实是16位
-      val timestam1 = obj1.getLongValue("timestamp")
-      val timestam2 = obj2.getLongValue("timestamp")
-      val maxTimeStamp = if (timestam1 > timestam2) timestam1 else timestam2
-      resJson.put("timestamp", maxTimeStamp)
-      //      SPAN total
-      val spanTotal = obj1.getInteger("spanTotal") + obj2.getInteger("spanTotal")
-      resJson.put("spanTotal", spanTotal)
-      //      order id
-      val orderIdsSet = mutable.HashSet[String]()
-      val orderIdsArray: JSONArray = new JSONArray()
-      if (obj1.containsKey("orderIds")) obj1.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
-      if (obj2.containsKey("orderIds")) obj2.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
-      //      去重
-      for (i <- orderIdsSet) orderIdsArray.add(i)
-      resJson.put("orderIds", orderIdsArray)
-      //      user id
-      val usrIdSet = mutable.HashSet[String]()
-      val usrIdArray = new JSONArray()
-      if (obj1.containsKey("userIds")) obj1.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
-      if (obj2.containsKey("userIds")) obj2.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
-      for (i <- usrIdSet) usrIdArray.add(i)
-      resJson.put("userIds", usrIdArray)
-      //      serverSpan
-      val serverSpan1 = obj1.getJSONObject("serverSpan")
-      val serverSpan2 = obj2.getJSONObject("serverSpan")
-      //      取最大的 subSpanTotal，subMaxDuration
-      for (key1 <- serverSpan1.keySet().toArray) {
-        val span1=serverSpan1.getJSONObject(key1.toString)
-        val subSpanTotal1 = span1.getInteger("subSpanTotal")
-        resJson.put("subSpanTotal",subSpanTotal1)
-        val subMaxDuration1 = span1.getInteger("subMaxDuration")
-        resJson.put("subMaxDuration", subMaxDuration1)
-        for (key2 <- serverSpan2.keySet().toArray) {
-          val span2=serverSpan2.getJSONObject(key2.toString)
-          if (key1.toString == key2.toString) {
-            val subSpanTotal2 = span2.getInteger("subSpanTotal")
-            resJson.put("subSpanTotal", if (subSpanTotal1 > subSpanTotal2) subSpanTotal1 else subSpanTotal2)
-            val subMaxDuration2 = span2.getInteger("subMaxDuration")
-            resJson.put("subMaxDuration", if (subMaxDuration1 > subMaxDuration2) subMaxDuration1 else subMaxDuration2)
+    val detailStream=kafaDirectStream.map(line => {
+      var res: String = ""
+      val chainStr=line.value()
+      if (chainStr != null && !chainStr.isEmpty) {
+        if (chainStr.substring(0, 1) == "{") {
+          val obj = new JsonParser().parse(chainStr).getAsJsonObject
+          if (obj.has("message")) {
+            val msg = obj.get("message").toString
+            if (msg.substring(0, 1) == "[") {
+              res = dealDetailJson(msg)
+            }
           }
         }
+        else if (chainStr.substring(0, 1) == "[") {
+          res = dealDetailJson(chainStr)
+        }
       }
-      resJson
+      res
     })
 
-    mapvalues.map(((x:String,y:JSONObject))=>y)
-
+    // 每次处理上几分钟的数据
+//    val mapvalues = kafaDirectStream.map(line =>dealKafkaJson(line.value()))
+    //    .filter(_ != None).window(Seconds(windowTimeMinute.toInt * 60)).repartition(200)
+//      .map(x => {
+//        //将traceId解析出来，然后进行聚合
+//        val resJsonObjectString = x.getOrElse("")
+//        val resJsonObject = JSON.parseObject(resJsonObjectString)
+//        var traceId = ""
+//        if (resJsonObject.containsKey("traceId")) traceId = resJsonObject.getString("traceId")
+//        (traceId, resJsonObject)
+//      }).filter(_._1 != "").reduceByKey((obj1: JSONObject, obj2: JSONObject) => mergeTrace(obj1, obj2)).map(x => x._2)
+//
     // 将最终的数据放入到es中。
-    //    mapvalues.foreachRDD(rdd => {
-    //      rdd.coalesce(500).foreachPartition(partitionOfRecords => {
-    //        partitionOfRecords.foreach(pair => {
-    //          //          EsClientUtil.bulkListAdd(pair._2.toString)
-    //        })
-    //      })
-    //    })
+    detailStream.foreachRDD(rdd => {
+      rdd.take(3).foreach(x=>logger.error("the result sample is  "+x))
+//      val currentTimestamp = ssc.sparkContext.broadcast(System.currentTimeMillis() - timeSplitBorder.toInt * 60 * 1000)
+//      rdd.coalesce(500).foreachPartition(partitionOfRecords => {
+//        partitionOfRecords.foreach(pair => {
+//          if (pair.getLong("maxTimeStamp") / 1000 > currentTimestamp.value)
+//            EsClientUtil.bulkListAdd(pair.toJSONString)
+//        })
+//      })
+    })
 
     ssc.start()
     ssc.awaitTermination()
+  }
+
+  /**
+    * 合并两个trace信息
+    *
+    * @param obj1
+    * @param obj2
+    * @return
+    */
+  def mergeTrace(obj1: JSONObject, obj2: JSONObject): JSONObject = {
+    //   {
+    //          "traceId": "415946b871a65c49f6be24d2430e648c",
+    //          "maxDuration": 5419,
+    //          "timestamp": 1550010847543641,
+    //          "spanTotal": 6,
+    //          "orderIds": ["2184433692"],
+    //          "userIds":["a","b"],
+    //          "serverSpan": {
+    //            "mysql": {
+    //              "subSpanTotal": 1,
+    //              "subMaxDuration": 1419
+    //            },
+    //            "hsq2": {
+    //              "subSpanTotal": 5,
+    //              "subMaxDuration": 5419
+    //            }
+    //          }
+    //        }
+    val resJson = new JSONObject()
+    //      将两个json合并到一起,用obj1作为返回结果了。
+    val maxDuration = obj1.getInteger("maxDuration") + obj2.getInteger("maxDuration")
+    resJson.put("maxDuration", maxDuration)
+    //      算出最近一次该trace出现的时间,这个时间其实是16位
+    val timestam1 = obj1.getLongValue("timestamp")
+    val timestam2 = obj2.getLongValue("timestamp")
+    val maxTimeStamp = if (timestam1 > timestam2) timestam1 else timestam2
+    resJson.put("timestamp", maxTimeStamp)
+    //      SPAN total
+    val spanTotal = obj1.getInteger("spanTotal") + obj2.getInteger("spanTotal")
+    resJson.put("spanTotal", spanTotal)
+    //      order id
+    val orderIdsSet = mutable.HashSet[String]()
+    val orderIdsArray: JSONArray = new JSONArray()
+    if (obj1.containsKey("orderIds")) obj1.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
+    if (obj2.containsKey("orderIds")) obj2.getJSONArray("orderIds").toArray.foreach(k => orderIdsSet.add(k.toString))
+    //      去重
+    for (i <- orderIdsSet) orderIdsArray.add(i)
+    resJson.put("orderIds", orderIdsArray)
+    //      user id
+    val usrIdSet = mutable.HashSet[String]()
+    val usrIdArray = new JSONArray()
+    if (obj1.containsKey("userIds")) obj1.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
+    if (obj2.containsKey("userIds")) obj2.getJSONArray("userIds").toArray.foreach(k => usrIdSet.add(k.toString))
+    for (i <- usrIdSet) usrIdArray.add(i)
+    resJson.put("userIds", usrIdArray)
+    //      serverSpan
+    val serverSpan1 = obj1.getJSONObject("serverSpan")
+    val serverSpan2 = obj2.getJSONObject("serverSpan")
+    //      取最大的 subSpanTotal，subMaxDuration
+    val keyJsonObject = new JSONObject()
+    for (key <- serverSpan1.keySet().toArray ++ serverSpan2.keySet().toArray) {
+      var subSpanTotal1 = 0
+      var subSpanTotal2 = 0
+      var subMaxDuration1 = 0
+      var subMaxDuration2 = 0
+      val valsJson=new JSONObject()
+      if (serverSpan1.containsKey(key.toString)) {
+        val span1 = serverSpan1.getJSONObject(key.toString)
+        subSpanTotal1 = span1.getInteger("subSpanTotal")
+        subMaxDuration1 = span1.getInteger("subMaxDuration")
+      }
+      if (serverSpan2.containsKey(key.toString)) {
+        val span2 = serverSpan2.getJSONObject(key.toString)
+        subSpanTotal2 = span2.getInteger("subSpanTotal")
+        subMaxDuration2 = span2.getInteger("subMaxDuration")
+      }
+      valsJson.put("subSpanTotal", if (subSpanTotal1 > subSpanTotal2) subSpanTotal1 else subSpanTotal2)
+      valsJson.put("subMaxDuration", if (subMaxDuration1 > subMaxDuration2) subMaxDuration1 else subMaxDuration2)
+      keyJsonObject.put(key.toString,valsJson)
+    }
+    resJson.put("serverSpan",keyJsonObject)
+    resJson
   }
 
   /**
@@ -167,6 +206,7 @@ object ChainTomStream {
     * @param msgStr
     */
   def dealDetailJson(msgStr: String) = {
+    val resArray=new JSONArray()
     try {
       val chainJsonArray = JSON.parseArray(msgStr)
       //一行日志有很多个json串
@@ -198,13 +238,15 @@ object ChainTomStream {
         val timestamp = chainSubObj.get("timestamp").toString
         val id = chainSubObj.getString("id")
         val day = ChainJson.getDay(timestamp)
-        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
-        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
+//        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
+//        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
+        resArray.add(chainSubObj.toJSONString)
       }
     } catch {
       case e: Exception =>
         e.printStackTrace()
     }
+    resArray.toJSONString
   }
 
   /**
