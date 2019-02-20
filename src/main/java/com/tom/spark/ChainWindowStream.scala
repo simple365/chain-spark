@@ -206,55 +206,6 @@ object ChainWindowStream {
   }
 
   /**
-    * 解析出trace的详细信息，放入hsq-zipkin-detail-xxx   索引中
-    *
-    * @param msgStr
-    */
-  def dealDetailJson(msgStr: String) = {
-    val resArray=new JSONArray()
-    try {
-      val chainJsonArray = JSON.parseArray(msgStr)
-      //一行日志有很多个json串
-      for (i <- 0 to chainJsonArray.size() - 1) {
-        val chainSubObj = chainJsonArray.getJSONObject(i)
-        // 后面处理的主要是binaryAnnotations解析出来的字符串进行处理
-        val binArr = chainSubObj.getJSONArray("binaryAnnotations")
-        var host = ""
-        var path = ""
-        var status = 200
-        //获取subspan里面的数据
-        for (n <- 0 to binArr.size() - 1) {
-          val binJsonObject = binArr.getJSONObject(n)
-          if (binJsonObject.containsKey("key")) {
-            val key = binJsonObject.getString("key")
-            if (key.equals("http.url")) {
-              val url = new URL(binJsonObject.getString("value"))
-              host = url.getHost
-              path = url.getPath
-            }
-            if (key == "http.status") status = binJsonObject.getInteger("value")
-          }
-        }
-        if (host.length > 0 && status >= 300) {
-          if (path.length > 1 && path.substring(0, 2).equals("//")) path = path.substring(1, path.length)
-          chainSubObj.put("serverCenter", host + path)
-          chainSubObj.put("status", status)
-        }
-        val timestamp = chainSubObj.get("timestamp").toString
-        val id = chainSubObj.getString("id")
-        val day = ChainJson.getDay(timestamp)
-//        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
-//        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
-        resArray.add(chainSubObj.toJSONString)
-      }
-    } catch {
-      case e: Exception =>
-        e.printStackTrace()
-    }
-    resArray.toJSONString
-  }
-
-  /**
     * 处理传递过来的原始数据，将其处理转换成一个trace的信息。
     *
     * @param msgStr

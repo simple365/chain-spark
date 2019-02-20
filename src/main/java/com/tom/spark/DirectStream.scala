@@ -37,9 +37,8 @@ object DirectStream {
       //消费策略（订阅固定的主题集合）
       ConsumerStrategies.Subscribe[String, String](topics, kafkaParams)
     )
-//  测试直接流
-    stream.map(line=>line.value())
-    stream.map(line=>(line.key(),line.value())).mapWithState()
+//  测试窗口
+    val vindowScreen=stream.map(line=>line.value()).window(Seconds(120))
 
     //迭代DStream中的RDD(KafkaRDD)，将每一个时间点对于的RDD拿出来
     stream.foreachRDD { rdd =>

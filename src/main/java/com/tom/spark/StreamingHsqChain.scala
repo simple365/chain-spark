@@ -101,19 +101,14 @@ object StreamingHsqChain {
 
 
       val topics = Array(topic)
-
       val initialRDD = ssc.sparkContext.parallelize(List(("0", initJson)))
-
       // 从kafka读取出来的流
-
       val kafaDirectStream = KafkaUtils.createDirectStream[String, String](
         ssc,
         // 在大多数情况下，您应该使用LocationStrategies.PreferConsistent如上所示。这将在可用的执行器之间均匀分配分区。
         LocationStrategies.PreferConsistent,
         ConsumerStrategies.Subscribe[String, String](topics, kafkaParams)
       )
-
-
 
       // 从kafka中读取数据后，过滤掉不为空掉数据
       val filtervalues = kafaDirectStream.flatMap(line => {
@@ -123,11 +118,8 @@ object StreamingHsqChain {
         Some(obj)
       }).filter(_ != null)
 
-
-
       // 数据换成一个二元组
       val mapvalues = filtervalues.repartition(50).map(x => (x.get("traceId").toString(), x.toString))
-
 
       // 状态数据进行累加
       val mapWithStateValues = mapvalues.mapWithState(StateSpec.function(mappingFunc).initialState(initialRDD))

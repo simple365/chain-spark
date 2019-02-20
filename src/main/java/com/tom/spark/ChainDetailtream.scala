@@ -16,9 +16,9 @@ import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, Loca
 import scala.collection.mutable
 import scala.collection.mutable.Map
 
-object ChainEStream {
+object ChainDetailtream {
 
-    private val logger: Logger = LoggerFactory.getLogger(ChainEStream.getClass)
+    private val logger: Logger = LoggerFactory.getLogger(ChainDetailtream.getClass)
   //  val sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
 
@@ -72,7 +72,7 @@ object ChainEStream {
     kafaDirectStream.foreachRDD(rdd=>{
       //获取该RDD对于的偏移量
       val offsetRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
-      rdd.map(line => {
+      val resultRdd=rdd.map(line => {
         //拿出对应的数据
         var res: String = ""
         val chainStr=line.value()
@@ -92,6 +92,7 @@ object ChainEStream {
         }
         res
       })
+      logger.error("生产数据量是："+resultRdd.count())
       //异步更新偏移量到kafka中
       kafaDirectStream.asInstanceOf[CanCommitOffsets].commitAsync(offsetRanges)
 
