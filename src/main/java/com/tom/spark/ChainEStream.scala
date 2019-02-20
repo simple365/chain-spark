@@ -30,20 +30,20 @@ object ChainEStream {
     val ckPoint = args(4)
 
 
-//    val topic = "hsq-zipkin"
-//    val kafkaUrl = "10.0.0.211:9211,10.0.0.212:9212,10.0.0.213:9213,10.0.0.214:9214,10.0.0.215:9215"
-//    val checkpointPath = "hdfs://10.0.0.215:8020/home/hadoop/" + ckPoint
-    val topic = "test"
-    val kafkaUrl = "localhost:9092"
-    val checkpointPath = "hdfs:///tmp/" + ckPoint
+    val topic = "hsq-zipkin"
+    val kafkaUrl = "10.0.0.211:9211,10.0.0.212:9212,10.0.0.213:9213,10.0.0.214:9214,10.0.0.215:9215"
+    val checkpointPath = "hdfs://10.0.0.215:8020/home/hadoop/" + ckPoint
+//    val topic = "test"
+//    val kafkaUrl = "localhost:9092"
+//    val checkpointPath = "hdfs:///tmp/" + ckPoint
 
 
     val conf = new SparkConf().setAppName(appName)
 //      .set("spark.streaming.kafka.consumer.cache.enabled", "false")
-//      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      .set("spark.kryo.registrator", "net.haoshiqi.java.ChainRegistrator")
       // 限制从kafka中每秒每个分区拉取的数据量
-//      .set("spark.streaming.kafka.maxRatePerPartition", "8000")
+      .set("spark.streaming.kafka.maxRatePerPartition", "8000")
          conf.setMaster("local[*]")
 
     val ssc = new StreamingContext(conf, Seconds(second.toInt))
@@ -139,8 +139,8 @@ object ChainEStream {
         val timestamp = chainSubObj.get("timestamp").toString
         val id = chainSubObj.getString("id")
         val day = ChainJson.getDay(timestamp)
-//        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
-//        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
+        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
+        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
         resArray.add(chainSubObj.toJSONString)
       }
     } catch {
