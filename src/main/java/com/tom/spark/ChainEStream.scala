@@ -6,8 +6,8 @@ import com.alibaba.fastjson.{JSON, JSONArray, JSONObject}
 import com.google.gson.JsonParser
 import org.apache.spark.streaming.kafka010.{CanCommitOffsets, HasOffsetRanges}
 import org.slf4j.{Logger, LoggerFactory}
-import org.elasticsearch.action.index.IndexRequest
-import org.elasticsearch.common.xcontent.XContentType
+//import org.elasticsearch.action.index.IndexRequest
+//import org.elasticsearch.common.xcontent.XContentType
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming._
@@ -139,8 +139,8 @@ object ChainEStream {
         val timestamp = chainSubObj.get("timestamp").toString
         val id = chainSubObj.getString("id")
         val day = ChainJson.getDay(timestamp)
-        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
-        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
+//        val indexRequest = new IndexRequest("hsq-zipkin-detail-" + day, "doc", id)
+//        EsClientUtil.bulkAdd(indexRequest.source(chainSubObj.toString, XContentType.JSON))
         resArray.add(chainSubObj.toJSONString)
       }
     } catch {
