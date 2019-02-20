@@ -15,9 +15,9 @@ import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, Loca
 import scala.collection.mutable
 import scala.collection.mutable.Map
 
-object ChainTomStream {
+object ChainWindowStream {
 
-    private val logger: Logger = LoggerFactory.getLogger(ChainTomStream.getClass)
+    private val logger: Logger = LoggerFactory.getLogger(ChainWindowStream.getClass)
   //  val sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
 
